@@ -65,7 +65,7 @@
     <h2 id="sim-h" class="card-title">シミュレーション</h2>
 
     <label class="field-row" for="in-rate">
-      <span>株価変動率（全銘柄一律）</span>
+      <span>全銘柄に一律適用</span>
       <span class="suffixed"><input type="text" inputmode="decimal" id="in-rate" value="0"><i>%</i></span>
     </label>
     <input type="range" id="rng-rate" min="-50" max="50" step="0.5" value="0" aria-label="株価変動率スライダー">
@@ -80,7 +80,15 @@
       <button type="button" data-r="30">+30%</button>
     </div>
 
-    <p class="hint">下の欄に目標を入れると、必要な変動率を逆算します。</p>
+    <p class="sim-status" id="sim-status" hidden>
+      <span id="sim-status-text"></span>
+      <button type="button" class="ghost-btn small" id="btn-reset-all">全銘柄を現在値に戻す</button>
+    </p>
+
+    <p class="hint">
+      銘柄カードをタップすると、その銘柄だけ個別に動かせます。<br>
+      下の欄に目標を入れると必要な変動率を逆算し、全銘柄へ一律に適用します（個別調整はリセットされます）。
+    </p>
     <label class="field-row" for="in-target-pnl">
       <span>目標の評価損益</span>
       <span class="prefixed"><i>¥</i><input type="text" inputmode="decimal" id="in-target-pnl" placeholder="500000"></span>

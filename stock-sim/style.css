@@ -29,6 +29,9 @@
 
 * { box-sizing: border-box; }
 
+/* display を持つ要素にも hidden を効かせる */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -252,7 +255,24 @@ input[type="range"] {
   margin: 14px 0 4px;
   font-size: 12px;
   color: var(--muted);
+  line-height: 1.7;
 }
+
+.sim-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  font-size: 12px;
+}
+
+.sim-status button { flex: 0 0 auto; }
 
 .warn {
   margin: 8px 0 0;
@@ -380,6 +400,7 @@ input[type="range"] {
 
 .panel-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
 }

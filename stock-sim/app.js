@@ -5,11 +5,12 @@
   const RATE_MIN = -100;
   const RATE_MAX = 1000;
 
+  // 各銘柄は sim（シミュレーション上の株価）を持ち、合計は常に sim から計算する。
+  // rate は「全銘柄へ一律適用」した直近の値で、表示用に覚えているだけ。
   const state = {
     holdings: [],
-    rate: 0,        // 全銘柄一律の変動率（%）
+    rate: 0,
     expandedId: null,
-    panelPrice: 0,  // 展開中カードの目標株価
   };
 
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -62,6 +63,7 @@
     const price = Number(h.price);
     if (![shares, avgCost, price].every(Number.isFinite)) return null;
     if (shares < 0 || avgCost < 0 || price < 0) return null;
+    const sim = Number(h.sim);
     return {
       id: String(h.id || newId()),
       name: String(h.name || '').slice(0, 40) || '(名称未設定)',
@@ -69,6 +71,7 @@
       shares,
       avgCost,
       price,
+      sim: Number.isFinite(sim) && sim >= 0 ? sim : price,
     };
   }
 
@@ -105,18 +108,46 @@
 
   // --- 計算 ---------------------------------------------------------------
 
-  function totals(ratePct) {
-    const m = 1 + ratePct / 100;
+  // base = 現在の株価での合計、value = シミュレーション株価での合計
+  function totals() {
     let cost = 0;
+    let base = 0;
     let value = 0;
     for (const h of state.holdings) {
       cost += h.shares * h.avgCost;
-      value += h.shares * h.price * m;
+      base += h.shares * h.price;
+      value += h.shares * h.sim;
     }
-    return { cost, value, pnl: value - cost };
+    return { cost, base, value, basePnl: base - cost, pnl: value - cost };
   }
 
   const holdingPnl = (h, price) => h.shares * (price - h.avgCost);
+  const holdingRate = (h) => (h.price > 0 ? (h.sim / h.price - 1) * 100 : NaN);
+
+  // 個別に動かしている銘柄（= 現在値から動いている銘柄）の数
+  const adjustedCount = () =>
+    state.holdings.filter((h) => Math.abs(h.sim - h.price) > 1e-9).length;
+
+  // 一律適用の値からずれている銘柄があるか
+  function isUniform() {
+    const m = 1 + state.rate / 100;
+    return state.holdings.every((h) => Math.abs(h.sim - h.price * m) < 1e-6);
+  }
+
+  function applyBulk(ratePct) {
+    if (!Number.isFinite(ratePct)) return;
+    state.rate = clampRate(ratePct);
+    const m = 1 + state.rate / 100;
+    for (const h of state.holdings) h.sim = Math.max(0, h.price * m);
+    save();
+    refresh();
+  }
+
+  function setSim(h, price) {
+    h.sim = Math.max(0, price);
+    save();
+    refresh();
+  }
 
   // --- DOM 参照 -----------------------------------------------------------
 
@@ -137,6 +168,8 @@
     inTargetPnl: $('#in-target-pnl'),
     inTargetValue: $('#in-target-value'),
     simWarn: $('#sim-warn'),
+    simStatus: $('#sim-status'),
+    simStatusText: $('#sim-status-text'),
     list: $('#list'),
     empty: $('#empty'),
     dlgEdit: $('#dlg-edit'),
@@ -235,8 +268,8 @@
     const panel = document.createElement('div');
     panel.className = 'h-panel';
     panel.innerHTML =
-      '<p class="panel-title">この銘柄だけで逆算する</p>' +
-      '<label class="field-row"><span>目標の株価</span>' +
+      '<p class="panel-title">この銘柄を個別に調整する</p>' +
+      '<label class="field-row"><span>想定する株価</span>' +
       '<span class="suffixed"><input type="text" inputmode="decimal" class="p-price"><i>円</i></span></label>' +
       '<label class="field-row"><span>株価の変動率</span>' +
       '<span class="suffixed"><input type="text" inputmode="decimal" class="p-chg"><i>%</i></span></label>' +
@@ -244,6 +277,7 @@
       '<span class="prefixed"><i>¥</i><input type="text" inputmode="decimal" class="p-pnl"></span></label>' +
       '<p class="panel-note"></p>' +
       '<div class="panel-actions">' +
+      '<button type="button" class="ghost-btn p-reset">現在値に戻す</button>' +
       '<button type="button" class="ghost-btn p-edit">編集</button>' +
       '<button type="button" class="ghost-btn p-del">削除</button>' +
       '</div>';
@@ -255,34 +289,25 @@
     refs.pPnl = $('.p-pnl', panel);
     refs.pNote = $('.panel-note', panel);
 
-    state.panelPrice = h.price * (1 + state.rate / 100);
-
+    // 3つの入力はどれもこの銘柄の想定株価を書き換える。合計にも即座に反映される。
     refs.pPrice.addEventListener('input', () => {
       const v = parseNum(refs.pPrice.value);
-      if (Number.isFinite(v) && v >= 0) {
-        state.panelPrice = v;
-        refreshPanel(h);
-      }
+      if (Number.isFinite(v) && v >= 0) setSim(h, v);
     });
     refs.pChg.addEventListener('input', () => {
       const v = parseNum(refs.pChg.value);
-      if (Number.isFinite(v)) {
-        state.panelPrice = Math.max(0, h.price * (1 + v / 100));
-        refreshPanel(h);
-      }
+      if (Number.isFinite(v)) setSim(h, h.price * (1 + v / 100));
     });
     refs.pPnl.addEventListener('input', () => {
       const v = parseNum(refs.pPnl.value);
-      if (Number.isFinite(v) && h.shares > 0) {
-        state.panelPrice = Math.max(0, h.avgCost + v / h.shares);
-        refreshPanel(h);
-      }
+      if (Number.isFinite(v) && h.shares > 0) setSim(h, h.avgCost + v / h.shares);
     });
     // 入力を終えたら桁区切りなどの整形をかけ直す
     for (const input of [refs.pPrice, refs.pChg, refs.pPnl]) {
       input.addEventListener('blur', () => refreshPanel(h));
     }
 
+    $('.p-reset', panel).addEventListener('click', () => setSim(h, h.price));
     $('.p-edit', panel).addEventListener('click', () => openEdit(h.id));
     $('.p-del', panel).addEventListener('click', () => {
       if (!confirm(h.name + ' を削除しますか？')) return;
@@ -298,8 +323,8 @@
     const refs = cards.get(h.id);
     if (!refs || !refs.panel) return;
 
-    const p = state.panelPrice;
-    const chg = h.price > 0 ? (p / h.price - 1) * 100 : NaN;
+    const p = h.sim;
+    const chg = holdingRate(h);
     const pnl = holdingPnl(h, p);
     const cost = h.shares * h.avgCost;
 
@@ -328,63 +353,73 @@
   // --- 表示更新 -----------------------------------------------------------
 
   function refresh() {
-    const now = totals(0);
-    const sim = totals(state.rate);
+    const t = totals();
+    const adjusted = adjustedCount();
 
-    el.sValue.textContent = yen(now.value);
-    el.sCost.textContent = yen(now.cost);
-    setSigned(el.sPnl, now.pnl, signedYen(now.pnl));
-    setSigned(el.sPnlPct, now.pnl, now.cost > 0 ? pctStr((now.pnl / now.cost) * 100) : '—');
+    el.sValue.textContent = yen(t.base);
+    el.sCost.textContent = yen(t.cost);
+    setSigned(el.sPnl, t.basePnl, signedYen(t.basePnl));
+    setSigned(el.sPnlPct, t.basePnl, t.cost > 0 ? pctStr((t.basePnl / t.cost) * 100) : '—');
 
-    const showSim = Math.abs(state.rate) > 1e-9 && state.holdings.length > 0;
+    // ポートフォリオ全体の変動率。銘柄ごとにばらついていても加重平均として意味を持つ。
+    const overall = t.base > 0 ? (t.value / t.base - 1) * 100 : NaN;
+    const showSim = adjusted > 0;
     el.simResult.hidden = !showSim;
     if (showSim) {
-      el.sRateChip.textContent = pctStr(state.rate);
+      el.sRateChip.textContent = pctStr(overall);
       el.sRateChip.classList.remove('up', 'down');
-      const c = signClass(state.rate);
+      const c = signClass(overall);
       if (c) el.sRateChip.classList.add(c);
-      el.sValue2.textContent = yen(sim.value);
-      setSigned(el.sPnl2, sim.pnl, signedYen(sim.pnl));
-      setSigned(el.sPnlPct2, sim.pnl, sim.cost > 0 ? pctStr((sim.pnl / sim.cost) * 100) : '—');
-      setSigned(el.sDelta, sim.value - now.value, signedYen(sim.value - now.value));
+      el.sValue2.textContent = yen(t.value);
+      setSigned(el.sPnl2, t.pnl, signedYen(t.pnl));
+      setSigned(el.sPnlPct2, t.pnl, t.cost > 0 ? pctStr((t.pnl / t.cost) * 100) : '—');
+      setSigned(el.sDelta, t.value - t.base, signedYen(t.value - t.base));
     }
 
     // シミュレーション入力欄（フォーカス中の欄は書き換えない）
     if (document.activeElement !== el.inRate) el.inRate.value = trimNum(state.rate);
     el.rngRate.value = String(Math.min(50, Math.max(-50, state.rate)));
 
-    const canReverse = now.value > 0;
+    const uniform = isUniform();
+    el.simStatus.hidden = uniform || state.holdings.length === 0;
+    if (!el.simStatus.hidden) {
+      el.simStatusText.textContent =
+        '銘柄ごとに個別調整中です（全体では ' + pctStr(overall) + '）。';
+    }
+
+    const canReverse = t.base > 0;
     el.simWarn.hidden = canReverse || state.holdings.length === 0;
     el.inTargetPnl.disabled = !canReverse;
     el.inTargetValue.disabled = !canReverse;
     if (document.activeElement !== el.inTargetPnl) {
-      el.inTargetPnl.value = canReverse ? nf.format(Math.round(sim.pnl)) : '';
+      el.inTargetPnl.value = canReverse ? nf.format(Math.round(t.pnl)) : '';
     }
     if (document.activeElement !== el.inTargetValue) {
-      el.inTargetValue.value = canReverse ? nf.format(Math.round(sim.value)) : '';
+      el.inTargetValue.value = canReverse ? nf.format(Math.round(t.value)) : '';
     }
 
     for (const btn of el.presets.children) {
-      btn.setAttribute('aria-pressed', String(Math.abs(Number(btn.dataset.r) - state.rate) < 1e-9));
+      const match = uniform && Math.abs(Number(btn.dataset.r) - state.rate) < 1e-9;
+      btn.setAttribute('aria-pressed', String(match));
     }
 
     // 各カード
-    const m = 1 + state.rate / 100;
     for (const h of state.holdings) {
       const refs = cards.get(h.id);
       if (!refs) continue;
-      const p = h.price * m;
-      const value = h.shares * p;
+      const value = h.shares * h.sim;
       const cost = h.shares * h.avgCost;
       const pnl = value - cost;
+      const rate = holdingRate(h);
+      const moved = Math.abs(h.sim - h.price) > 1e-9;
 
-      // 変動させているときだけ「現在値 → 変動後」が分かるように元の株価も出す
-      refs.before.hidden = !showSim;
-      refs.before.textContent = showSim ? '現在 ' + priceStr(h.price) + '円' : '';
-      refs.price.textContent = priceStr(p) + '円';
-      refs.chip.textContent = pctStr(state.rate);
+      // 動かしているときだけ「現在値 → 変動後」が分かるように元の株価も出す
+      refs.before.hidden = !moved;
+      refs.before.textContent = moved ? '現在 ' + priceStr(h.price) + '円' : '';
+      refs.price.textContent = priceStr(h.sim) + '円';
+      refs.chip.textContent = pctStr(rate);
       refs.chip.classList.remove('up', 'down');
-      const cc = signClass(state.rate);
+      const cc = signClass(rate);
       if (cc) refs.chip.classList.add(cc);
       refs.value.textContent = yen(value);
       setSigned(refs.pnl, pnl, signedYen(pnl));
@@ -392,13 +427,6 @@
 
       if (refs.panel) refreshPanel(h);
     }
-  }
-
-  function setRate(r) {
-    if (!Number.isFinite(r)) return;
-    state.rate = clampRate(r);
-    save();
-    refresh();
   }
 
   // --- 編集ダイアログ -----------------------------------------------------
@@ -438,8 +466,18 @@
       return;
     }
 
-    const rec = { id: editingId || newId(), name, code: f.code.value.trim(), shares, avgCost, price };
-    const i = state.holdings.findIndex((x) => x.id === rec.id);
+    const i = editingId ? state.holdings.findIndex((x) => x.id === editingId) : -1;
+    const prev = i >= 0 ? state.holdings[i] : null;
+    const rec = normalize({
+      id: editingId || newId(),
+      name,
+      code: f.code.value.trim(),
+      shares,
+      avgCost,
+      price,
+      // 現在の株価を変えたら個別調整は意味を失うのでリセットする
+      sim: prev && prev.price === price ? prev.sim : price,
+    });
     if (i >= 0) state.holdings[i] = rec;
     else state.holdings.push(rec);
 
@@ -530,28 +568,30 @@
 
   // --- イベント -----------------------------------------------------------
 
-  el.inRate.addEventListener('input', () => setRate(parseNum(el.inRate.value)));
+  el.inRate.addEventListener('input', () => applyBulk(parseNum(el.inRate.value)));
   el.inRate.addEventListener('blur', () => refresh());
-  el.rngRate.addEventListener('input', () => setRate(Number(el.rngRate.value)));
+  el.rngRate.addEventListener('input', () => applyBulk(Number(el.rngRate.value)));
 
   el.presets.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-r]');
-    if (btn) setRate(Number(btn.dataset.r));
+    if (btn) applyBulk(Number(btn.dataset.r));
   });
 
   el.inTargetPnl.addEventListener('input', () => {
     const v = parseNum(el.inTargetPnl.value);
-    const now = totals(0);
-    if (Number.isFinite(v) && now.value > 0) setRate(((v + now.cost) / now.value - 1) * 100);
+    const t = totals();
+    if (Number.isFinite(v) && t.base > 0) applyBulk(((v + t.cost) / t.base - 1) * 100);
   });
   el.inTargetPnl.addEventListener('blur', () => refresh());
 
   el.inTargetValue.addEventListener('input', () => {
     const v = parseNum(el.inTargetValue.value);
-    const now = totals(0);
-    if (Number.isFinite(v) && now.value > 0) setRate((v / now.value - 1) * 100);
+    const t = totals();
+    if (Number.isFinite(v) && t.base > 0) applyBulk((v / t.base - 1) * 100);
   });
   el.inTargetValue.addEventListener('blur', () => refresh());
+
+  $('#btn-reset-all').addEventListener('click', () => applyBulk(0));
 
   $('#btn-add').addEventListener('click', () => openEdit(null));
   $('#btn-add2').addEventListener('click', () => openEdit(null));
