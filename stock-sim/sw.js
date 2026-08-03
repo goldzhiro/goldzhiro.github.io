@@ -1,6 +1,6 @@
 // オフラインでも起動できるようにアプリ本体をキャッシュする。
 // アプリを更新したら CACHE の版数を上げること。
-const CACHE = 'stock-sim-v1';
+const CACHE = 'stock-sim-v2';
 const ASSETS = [
   './',
   './index.html',

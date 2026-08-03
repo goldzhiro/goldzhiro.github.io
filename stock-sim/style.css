@@ -330,11 +330,22 @@ input[type="range"] {
 }
 
 .h-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
   text-align: right;
   flex: 0 0 auto;
 }
 
 .h-right .num { font-size: 16px; }
+
+.r-before {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .h-grid {
   display: grid;

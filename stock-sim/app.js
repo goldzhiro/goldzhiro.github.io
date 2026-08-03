@@ -171,7 +171,8 @@
         '<span class="h-sub"></span>' +
         '</span>' +
         '<span class="h-right">' +
-        '<b class="num r-price"></b><br>' +
+        '<span class="r-before"></span>' +
+        '<b class="num r-price"></b>' +
         '<span class="chip r-chip"></span>' +
         '</span>';
 
@@ -199,6 +200,7 @@
       cards.set(h.id, {
         art,
         head,
+        before: $('.r-before', head),
         price: $('.r-price', head),
         chip: $('.r-chip', head),
         value: $('.r-value', grid),
@@ -376,6 +378,9 @@
       const cost = h.shares * h.avgCost;
       const pnl = value - cost;
 
+      // 変動させているときだけ「現在値 → 変動後」が分かるように元の株価も出す
+      refs.before.hidden = !showSim;
+      refs.before.textContent = showSim ? '現在 ' + priceStr(h.price) + '円' : '';
       refs.price.textContent = priceStr(p) + '円';
       refs.chip.textContent = pctStr(state.rate);
       refs.chip.classList.remove('up', 'down');
